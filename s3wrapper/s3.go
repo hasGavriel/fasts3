@@ -203,8 +203,24 @@ func DeleteMulti(bucket *s3.Bucket, keys []string) error {
     return nil
 }
 
+
+func ListMain(bucket *s3.Bucket, prefix string, searchDepth int, isRecursive bool) chan s3.Key {
+    chResults := make(chan s3.Key, 1000)    // Channel for results
+    const MAX_SIMULTANEOUS_WORKERS = 100                    // limit the number of GoListRecurse workers
+    chThrottle := make(chan int, MAX_SIMULTANEOUS_WORKERS)  // every worker adds a msg to the channel at start and removes one at end
+    var wg sync.WaitGroup // Wait group counter for go-routines - invokers add 1, goroutines declare done before exiting
+    wg.Add(1)             // This is in anticipation of our first go GoListRecurse (and needed here to prevent premature channel closure)
+    go func () {          // Monitor worker completion - close channel when everyone's done writing
+        wg.Wait()
+        close(chResults)
+    }()
+    go goListRecurse(bucket, prefix, searchDepth, isRecursive, chResults, chThrottle, &wg)
+    return chResults;
+}
+
+
 // lists a prefix and includes common prefixes
-func ListWithCommonPrefixes(bucket *s3.Bucket, prefix string) chan s3.Key {
+func depreciated_ListWithCommonPrefixes(bucket *s3.Bucket, prefix string) chan s3.Key {
     ch := make(chan s3.Key, 1000)
     go func() {
         defer close(ch)
@@ -246,23 +262,27 @@ func partition(list []listWork, partitionSize int) [][]listWork {
     return partitions
 }
 
-// GoListRecurse lists prefix in parallel using searchDepth to search for routine's work
-func GoListRecurse(bucket *s3.Bucket, prefix string, searchDepth int, chResults chan s3.Key, chThrottle chan int, wg *sync.WaitGroup) {
+// goListRecurse lists prefixes in parallel using searchDepth to control forking
+func goListRecurse(bucket *s3.Bucket, prefix string, searchDepth int, isRecursive bool, chResults chan s3.Key, chThrottle chan int, wg *sync.WaitGroup) {
     defer wg.Done()
     defer func() {
         <- chThrottle
     }()
     chThrottle <- 1     // This will block if too many workers
-    for res := range List(bucket, prefix, defaultDelimiter) {
+    myDelimiter := defaultDelimiter
+    if searchDepth < 1 && isRecursive {
+        myDelimiter = ""
+    }
+    for res := range List(bucket, prefix, myDelimiter) {
         if len(res.CommonPrefixes) != 0 {
-            if searchDepth > 1 {
+            if searchDepth > 0 {
                 for _, newPfx := range res.CommonPrefixes {
                     wg.Add(1)
-                    go GoListRecurse(bucket, newPfx, searchDepth-1, chResults, chThrottle, wg)
+                    go goListRecurse(bucket, newPfx, searchDepth-1, isRecursive, chResults, chThrottle, wg)
                 }
             } else {
                 for _, newPfx := range res.CommonPrefixes {
-                    chResults <- s3.Key{Key: newPfx}
+                    chResults <- s3.Key{newPfx, "", -1, "", "", s3.Owner{}}
                 }
             }
         }

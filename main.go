@@ -117,22 +117,7 @@ func Ls(s3Uri string, searchDepth int, isRecursive, isHumanReadable, includeDate
     bucket, prefix := parseS3Uri(s3Uri)
     b := GetBucket(bucket)
     
-    var ch chan s3.Key
-    
-    if isRecursive {
-        ch = make(chan s3.Key, 1000)    // Channel for results
-        const MAX_SIMULTANEOUS_WORKERS = 100                    // limit the number of GoListRecurse workers
-        chThrottle := make(chan int, MAX_SIMULTANEOUS_WORKERS)  // every worker adds a msg to the channel at start and removes one at end
-        var wg sync.WaitGroup // Wait group counter for go-routines - invokers add 1, goroutines declare done before exiting
-        wg.Add(1)             // This is in anticipation of our first go GoListRecurse (and needed here to prevent premature channel closure)
-        go func () {          // Monitor worker completion - close channel when everyone's done writing
-            wg.Wait()
-            close(ch)           
-        }()
-        go s3wrapper.GoListRecurse(b, prefix, searchDepth, ch, chThrottle, &wg)
-    } else {
-        ch = s3wrapper.ListWithCommonPrefixes(b, prefix)
-    }
+    ch := s3wrapper.ListMain(b, prefix, searchDepth, isRecursive)
     
     for k := range ch {
         if k.Size < 0 {
