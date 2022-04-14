@@ -8,17 +8,8 @@ Fast s3 utility is a faster version of s3cmd's ls, get, and cp functions ideal f
 
 # Installation
 
-## Mac
-```
-brew install tuneinc/tap/fasts3
-```
-## Binaries
-
-head over to the [Releases](https://github.com/tuneinc/fasts3/releases) page.
-
-## Via go get
 ```bash
-go get -u github.com/tuneinc/fasts3
+go get -u github.com/metaverse/fasts3
 ```
 This should install the binary under `$GOPATH/bin/`
 
